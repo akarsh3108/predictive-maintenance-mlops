@@ -1,4 +1,5 @@
 """Tests for data loading, schema validation, and splitting."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -6,7 +7,12 @@ import pandas as pd
 import pytest
 
 from src.data.generate_data import FEATURE_COLUMNS, TARGET_COLUMN, generate_sensor_data
-from src.data.preprocessing import SchemaError, compute_data_hash, load_and_split, validate_schema
+from src.data.preprocessing import (
+    SchemaError,
+    compute_data_hash,
+    load_and_split,
+    validate_schema,
+)
 
 
 def test_generate_data_has_correct_shape():
@@ -20,7 +26,10 @@ def test_generate_data_failure_rate_reasonable():
     df = generate_sensor_data(n_samples=10_000, seed=42)
     rate = df[TARGET_COLUMN].mean()
     assert 0.02 < rate < 0.25, f"Unrealistic failure rate: {rate}"
+
+
 """Failure rate should be non-trivial but not dominate (5-25%)."""
+
 
 def test_generate_data_is_reproducible():
     df1 = generate_sensor_data(n_samples=500, seed=7)
@@ -74,8 +83,9 @@ def test_load_and_split_preserves_failure_rate(tmp_path):
     split = load_and_split(csv_path, seed=42)
     overall_rate = df[TARGET_COLUMN].mean()
     for y in (split.y_train, split.y_val, split.y_test):
-        assert abs(y.mean() - overall_rate) < 0.02, \
-            f"Stratified split failed: {y.mean()} vs {overall_rate}"
+        assert (
+            abs(y.mean() - overall_rate) < 0.02
+        ), f"Stratified split failed: {y.mean()} vs {overall_rate}"
 
 
 def test_load_and_split_scaler_fitted_on_train_only(tmp_path):

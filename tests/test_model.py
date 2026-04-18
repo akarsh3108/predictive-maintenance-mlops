@@ -1,4 +1,5 @@
 """Tests for the PyTorch classifier."""
+
 from __future__ import annotations
 
 import torch
@@ -33,8 +34,7 @@ def test_model_gradients_flow():
 
     # At least one parameter should have a non-zero gradient
     has_grad = any(
-        p.grad is not None and p.grad.abs().sum() > 0
-        for p in model.parameters()
+        p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters()
     )
     assert has_grad, "No gradients flowed — check autograd setup"
 

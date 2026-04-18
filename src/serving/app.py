@@ -8,13 +8,13 @@ Exposes:
   - GET  /metrics      — Prometheus scrape endpoint
   - POST /reload       — admin endpoint to reload model without restarting pod
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 import joblib
@@ -29,26 +29,31 @@ from pydantic import BaseModel, Field
 
 from src.data.generate_data import FEATURE_COLUMNS
 
-
 MODEL_NAME = os.getenv("MODEL_NAME", "predictive_maintenance_model")
 MODEL_STAGE = os.getenv("MODEL_STAGE", "Production")
 DEFAULT_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.5"))
 
 logger = logging.getLogger("pdm.serving")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+)
 
 
 # ---------- Prometheus metrics ----------
 # These are scraped by the Kubernetes Prometheus operator and visualized in Grafana.
 PREDICTIONS_TOTAL = Counter(
-    "pdm_predictions_total", "Total predictions made", ["outcome"],
+    "pdm_predictions_total",
+    "Total predictions made",
+    ["outcome"],
 )
 PREDICTION_LATENCY = Histogram(
-    "pdm_prediction_latency_seconds", "Inference latency",
+    "pdm_prediction_latency_seconds",
+    "Inference latency",
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
 )
 PREDICTION_SCORE = Histogram(
-    "pdm_prediction_score", "Distribution of predicted failure probabilities",
+    "pdm_prediction_score",
+    "Distribution of predicted failure probabilities",
     buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
 )
 MODEL_LOAD_ERRORS = Counter("pdm_model_load_errors_total", "Failures loading model")
@@ -57,6 +62,7 @@ MODEL_LOAD_ERRORS = Counter("pdm_model_load_errors_total", "Failures loading mod
 # ---------- Pydantic schemas ----------
 class SensorReading(BaseModel):
     """One sample of sensor telemetry. Field names must match FEATURE_COLUMNS."""
+
     air_temperature_k: float = Field(..., ge=250, le=400)
     process_temperature_k: float = Field(..., ge=250, le=400)
     rotational_speed_rpm: float = Field(..., ge=0, le=5000)
@@ -117,7 +123,10 @@ class ModelBundle:
 
             logger.info(
                 "Loading model %s v%s from stage %s (run_id=%s)",
-                MODEL_NAME, mv.version, MODEL_STAGE, mv.run_id,
+                MODEL_NAME,
+                mv.version,
+                MODEL_STAGE,
+                mv.run_id,
             )
 
             model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
@@ -126,7 +135,8 @@ class ModelBundle:
 
             # Download the scaler artifact from the run that produced this model
             scaler_local = client.download_artifacts(
-                run_id=mv.run_id, path="preprocessing/scaler.pkl",
+                run_id=mv.run_id,
+                path="preprocessing/scaler.pkl",
             )
             self.scaler = joblib.load(scaler_local)
 
@@ -201,11 +211,13 @@ def predict(req: PredictRequest) -> PredictResponse:
     for p in probs:
         p_float = float(p)
         will_fail = p_float >= threshold
-        predictions.append(Prediction(
-            failure_probability=p_float,
-            will_fail=will_fail,
-            threshold_used=threshold,
-        ))
+        predictions.append(
+            Prediction(
+                failure_probability=p_float,
+                will_fail=will_fail,
+                threshold_used=threshold,
+            )
+        )
         PREDICTIONS_TOTAL.labels(outcome="failure" if will_fail else "healthy").inc()
         PREDICTION_SCORE.observe(p_float)
 
@@ -247,6 +259,7 @@ def metrics() -> Response:
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "src.serving.app:app",
         host="0.0.0.0",

@@ -1,4 +1,5 @@
 """Data loading, schema validation, and preprocessing."""
+
 from __future__ import annotations
 
 import hashlib
@@ -85,12 +86,17 @@ def load_and_split(
 
     # Stratified split — preserves failure rate across splits (critical for imbalanced data)
     X_trainval, X_test, y_trainval, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=seed,
+        X,
+        y,
+        test_size=test_size,
+        stratify=y,
+        random_state=seed,
     )
     # Adjust val_size to be a fraction of the remaining data, not the original
     val_fraction_of_remaining = val_size / (1 - test_size)
     X_train, X_val, y_train, y_val = train_test_split(
-        X_trainval, y_trainval,
+        X_trainval,
+        y_trainval,
         test_size=val_fraction_of_remaining,
         stratify=y_trainval,
         random_state=seed,
@@ -102,8 +108,12 @@ def load_and_split(
     X_test = scaler.transform(X_test).astype(np.float32)
 
     return DataSplit(
-        X_train=X_train, X_val=X_val, X_test=X_test,
-        y_train=y_train, y_val=y_val, y_test=y_test,
+        X_train=X_train,
+        X_val=X_val,
+        X_test=X_test,
+        y_train=y_train,
+        y_val=y_val,
+        y_test=y_test,
         scaler=scaler,
         feature_names=list(FEATURE_COLUMNS),
         data_hash=data_hash,

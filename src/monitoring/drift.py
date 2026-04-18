@@ -8,6 +8,7 @@ In production this would be run on a cron (e.g. every hour via a K8s
 CronJob) against logged inference requests. The retraining trigger
 could fire a Jenkins webhook or a Kubernetes Job.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,12 +17,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from scipy import stats
 
 from src.data.generate_data import FEATURE_COLUMNS
-
 
 # Per-feature p-value threshold. Low p-value = distributions differ.
 DRIFT_P_THRESHOLD = 0.01
@@ -78,12 +77,14 @@ def detect_drift(
         if col not in reference.columns or col not in current.columns:
             continue
         ks_stat, p_value = stats.ks_2samp(reference[col], current[col])
-        results.append(FeatureDriftResult(
-            feature=col,
-            ks_statistic=float(ks_stat),
-            p_value=float(p_value),
-            drifted=bool(p_value < p_threshold),
-        ))
+        results.append(
+            FeatureDriftResult(
+                feature=col,
+                ks_statistic=float(ks_stat),
+                p_value=float(p_value),
+                drifted=bool(p_value < p_threshold),
+            )
+        )
 
     drifted_count = sum(1 for r in results if r.drifted)
     drifted_fraction = drifted_count / len(results) if results else 0.0
@@ -100,12 +101,21 @@ def detect_drift(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference", type=Path, required=True,
-                        help="Training data CSV (reference distribution)")
-    parser.add_argument("--current", type=Path, required=True,
-                        help="Recent production data CSV")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Optional JSON output path for the report")
+    parser.add_argument(
+        "--reference",
+        type=Path,
+        required=True,
+        help="Training data CSV (reference distribution)",
+    )
+    parser.add_argument(
+        "--current", type=Path, required=True, help="Recent production data CSV"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Optional JSON output path for the report",
+    )
     args = parser.parse_args()
 
     reference = pd.read_csv(args.reference)

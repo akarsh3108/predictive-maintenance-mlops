@@ -7,6 +7,7 @@ Key MLOps behaviors:
      it's promoted to 'Staging' (human approval still required for Production).
   4. Otherwise it's logged but left in 'None' stage.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,6 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.data.preprocessing import load_and_split
 from src.models.classifier import FailurePredictor
-
 
 MODEL_NAME = "predictive_maintenance_model"
 
@@ -63,9 +63,14 @@ class TrainConfig:
 def get_git_sha() -> str:
     """Capture code version for reproducibility. Returns 'unknown' if not a git repo."""
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL,
-        ).decode().strip()[:8]
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()[:8]
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
 
@@ -156,7 +161,9 @@ def maybe_promote_to_staging(run_id: str, test_auc: float) -> str:
     if not prod_versions:
         # No Production yet — promote this one to Staging
         client.transition_model_version_stage(
-            name=MODEL_NAME, version=new_version, stage="Staging",
+            name=MODEL_NAME,
+            version=new_version,
+            stage="Staging",
         )
         print(f"[registry] v{new_version} → Staging (no existing Production)")
         return "Staging"
@@ -166,7 +173,9 @@ def maybe_promote_to_staging(run_id: str, test_auc: float) -> str:
 
     if test_auc > prod_auc:
         client.transition_model_version_stage(
-            name=MODEL_NAME, version=new_version, stage="Staging",
+            name=MODEL_NAME,
+            version=new_version,
+            stage="Staging",
         )
         print(
             f"[registry] v{new_version} → Staging "
@@ -197,7 +206,8 @@ def train(config: TrainConfig) -> dict[str, float]:
     )
 
     train_ds = TensorDataset(
-        torch.from_numpy(split.X_train), torch.from_numpy(split.y_train),
+        torch.from_numpy(split.X_train),
+        torch.from_numpy(split.y_train),
     )
     train_loader = DataLoader(train_ds, batch_size=config.batch_size, shuffle=True)
 
@@ -210,7 +220,9 @@ def train(config: TrainConfig) -> dict[str, float]:
     pos_weight = compute_pos_weight(split.y_train).to(device)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay,
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
     )
 
     # MLflow experiment tracking
@@ -259,7 +271,9 @@ def train(config: TrainConfig) -> dict[str, float]:
         mlflow.set_tag("quality_gate", "PASSED")
 
         # Log the model along with scaler (as artifact) so serving can preprocess
-        import joblib, tempfile
+        import joblib
+        import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             scaler_path = Path(tmpdir) / "scaler.pkl"
             joblib.dump(split.scaler, scaler_path)

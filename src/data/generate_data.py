@@ -6,6 +6,7 @@ Simulates industrial machines with realistic failure patterns:
 - Failures become more likely as tool wear, temperature, and vibration rise
 - Includes both gradual degradation and sudden failures
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
 
 FEATURE_COLUMNS = [
     "air_temperature_k",
@@ -45,15 +45,17 @@ def generate_sensor_data(n_samples: int = 10_000, seed: int = 42) -> pd.DataFram
     vibration = rng.normal(2.5, 0.5, n_samples) + tool_wear / 500  # worsens with wear
     pressure = rng.normal(5.0, 0.3, n_samples)
 
-    df = pd.DataFrame({
-        "air_temperature_k": air_temp,
-        "process_temperature_k": process_temp,
-        "rotational_speed_rpm": rotational_speed,
-        "torque_nm": torque,
-        "tool_wear_min": tool_wear,
-        "vibration_mm_s": vibration,
-        "pressure_bar": pressure,
-    })
+    df = pd.DataFrame(
+        {
+            "air_temperature_k": air_temp,
+            "process_temperature_k": process_temp,
+            "rotational_speed_rpm": rotational_speed,
+            "torque_nm": torque,
+            "tool_wear_min": tool_wear,
+            "vibration_mm_s": vibration,
+            "pressure_bar": pressure,
+        }
+    )
 
     # Failure logic: combination of risk factors raises failure probability.
     # We create a latent "stress" score, then convert it to a probability.

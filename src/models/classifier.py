@@ -3,6 +3,7 @@
 We use an MLP because the input is tabular sensor readings. An LSTM variant
 (for sequential telemetry) is stubbed at the bottom for future work.
 """
+
 from __future__ import annotations
 
 import torch
@@ -26,12 +27,14 @@ class FailurePredictor(nn.Module):
         layers: list[nn.Module] = []
         prev_dim = n_features
         for h in hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, h),
-                nn.BatchNorm1d(h),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, h),
+                    nn.BatchNorm1d(h),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             prev_dim = h
         layers.append(nn.Linear(prev_dim, 1))  # logit output
         self.net = nn.Sequential(*layers)

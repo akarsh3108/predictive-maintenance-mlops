@@ -1,7 +1,7 @@
 """Tests for the drift detection module."""
+
 from __future__ import annotations
 
-import pandas as pd
 
 from src.data.generate_data import generate_sensor_data
 from src.monitoring.drift import detect_drift
