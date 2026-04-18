@@ -61,6 +61,7 @@ jobs:
       - name: Validate model
         env:
           MLFLOW_TRACKING_URI: file:./mlruns
+          PYTHONPATH: .
         run: |
           RUN_ID=$(python -c "import mlflow; mlflow.set_tracking_uri('file:./mlruns'); c=mlflow.MlflowClient(); exp=c.get_experiment_by_name('predictive_maintenance'); runs=c.search_runs([exp.experiment_id], order_by=['start_time DESC'], max_results=1); print(runs[0].info.run_id)")
           python scripts/validate_model.py --run-id $RUN_ID
