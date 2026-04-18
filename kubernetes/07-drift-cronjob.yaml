@@ -1,0 +1,101 @@
+# Drift detection CronJob.
+# Runs hourly, compares recent production traffic to the training baseline,
+# and triggers a retraining Job if drift is detected.
+#
+# In a real setup:
+#   - "Current data" would come from a feature store or logged predictions
+#     (e.g. inference requests written to S3 from the serving pod)
+#   - The retraining trigger could call a Jenkins webhook instead of
+#     creating a Job directly. Shown here as a direct kubectl call for clarity.
+
+# ServiceAccount with permission to create Jobs — needed so the drift
+# detector can trigger retraining.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pdm-drift-detector
+  namespace: pdm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pdm-job-creator
+  namespace: pdm
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pdm-drift-detector-job-creator
+  namespace: pdm
+subjects:
+  - kind: ServiceAccount
+    name: pdm-drift-detector
+    namespace: pdm
+roleRef:
+  kind: Role
+  name: pdm-job-creator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pdm-drift-detector
+  namespace: pdm
+spec:
+  schedule: "0 * * * *"  # every hour on the hour
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: pdm-drift-detector
+          containers:
+            - name: drift-detector
+              image: ghcr.io/your-org/pdm-training:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  echo "Running drift detection..."
+                  python -m src.monitoring.drift \
+                    --reference /app/data/sensors.csv \
+                    --current /app/data/recent.csv \
+                    --output /tmp/drift-report.json
+                  # Exit code 2 from the detector means drift was found.
+                  # But since `set -e` is on, we handle it explicitly:
+                  EXIT=$?
+                  if [ $EXIT -eq 2 ]; then
+                    echo "DRIFT DETECTED — triggering retraining"
+                    # Install kubectl at runtime (or bake into image)
+                    kubectl create -f /manifests/06-training-job.yaml
+                  elif [ $EXIT -eq 0 ]; then
+                    echo "No drift detected"
+                  else
+                    echo "Drift detector failed with exit $EXIT"
+                    exit $EXIT
+                  fi
+              env:
+                - name: MLFLOW_TRACKING_URI
+                  value: "http://mlflow:5000"
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 512Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
+              volumeMounts:
+                - name: training-data
+                  mountPath: /app/data
+          volumes:
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: training-data-pvc

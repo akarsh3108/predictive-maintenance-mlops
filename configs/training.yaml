@@ -1,0 +1,25 @@
+# Training configuration for predictive maintenance model.
+# Override any field from the command line by editing this file or
+# by passing a different --config path.
+
+data_path: data/sensors.csv
+
+# Optimization
+epochs: 30
+batch_size: 256
+learning_rate: 0.001
+weight_decay: 0.00001
+
+# Architecture
+hidden_dims: [64, 32, 16]
+dropout: 0.2
+
+# Quality gate — model won't be registered in MLflow if test AUC is below this.
+# Prevents bad models from being promoted to Staging.
+min_test_auc: 0.85
+
+# Reproducibility
+seed: 42
+
+# MLflow
+mlflow_experiment: predictive_maintenance

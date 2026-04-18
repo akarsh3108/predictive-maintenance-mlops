@@ -1,0 +1,106 @@
+# Training runs as Kubernetes Jobs (one-off) or CronJobs (scheduled).
+# Jenkins can trigger an ad-hoc Job via `kubectl create -f`, or you can
+# rely on the CronJob for regular retraining.
+
+# ---------- One-off training Job template ----------
+# Apply with: kubectl create -f 06-training-job.yaml
+# The generateName ensures each apply creates a uniquely-named Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: pdm-training-
+  namespace: pdm
+  labels:
+    app: pdm-training
+spec:
+  # Give up after 2 hours — our model trains in minutes, so this is a guard
+  # against stuck runs (e.g. hung MLflow connections).
+  activeDeadlineSeconds: 7200
+  backoffLimit: 1  # retry once if the pod crashes
+  ttlSecondsAfterFinished: 86400  # auto-cleanup completed Jobs after 24h
+  template:
+    metadata:
+      labels:
+        app: pdm-training
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: trainer
+          image: ghcr.io/your-org/pdm-training:latest
+          command: ["python", "-m", "src.training.train"]
+          args: ["--config", "configs/training.yaml"]
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow:5000"
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+          volumeMounts:
+            - name: training-data
+              mountPath: /app/data
+      volumes:
+        - name: training-data
+          persistentVolumeClaim:
+            claimName: training-data-pvc
+
+---
+# PVC for training data. In production, the training container would
+# pull from S3/GCS instead of a mounted volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training-data-pvc
+  namespace: pdm
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# ---------- Scheduled retraining ----------
+# Retrains weekly, Sundays at 2am UTC.
+# Drift-triggered retraining is handled by a separate Job created by
+# the drift-detector CronJob (below).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pdm-retraining
+  namespace: pdm
+spec:
+  schedule: "0 2 * * 0"  # Sun 02:00 UTC
+  concurrencyPolicy: Forbid  # don't start a new run if the previous is still going
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 604800  # keep history for 7 days
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trainer
+              image: ghcr.io/your-org/pdm-training:latest
+              env:
+                - name: MLFLOW_TRACKING_URI
+                  value: "http://mlflow:5000"
+              resources:
+                requests:
+                  cpu: 1000m
+                  memory: 2Gi
+                limits:
+                  cpu: 4000m
+                  memory: 8Gi
+              volumeMounts:
+                - name: training-data
+                  mountPath: /app/data
+          volumes:
+            - name: training-data
+              persistentVolumeClaim:
+                claimName: training-data-pvc

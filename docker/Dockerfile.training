@@ -1,0 +1,29 @@
+# Training container. Designed to run as a Kubernetes Job or in Jenkins.
+# Larger than the serving image because it keeps training-time deps
+# (sklearn metrics, MLflow client, etc) that serving doesn't need.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
+
+COPY src/ ./src/
+COPY configs/ ./configs/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Default entrypoint — override with `docker run ... python -m src.training.train`
+# when you want to pass custom config.
+CMD ["python", "-m", "src.training.train", "--config", "configs/training.yaml"]

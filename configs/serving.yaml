@@ -1,0 +1,10 @@
+# Serving configuration.
+# Most values are overridden by env vars in the Kubernetes deployment.
+
+model_name: predictive_maintenance_model
+model_stage: Production
+decision_threshold: 0.5
+port: 8000
+
+# MLflow tracking server — overridden by MLFLOW_TRACKING_URI env var in K8s.
+mlflow_tracking_uri: http://mlflow:5000

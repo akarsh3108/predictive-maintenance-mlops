@@ -1,0 +1,9 @@
+# Dedicated namespace keeps all PDM resources isolated from other workloads
+# on the cluster and makes RBAC / resource quotas easier to manage.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pdm
+  labels:
+    app.kubernetes.io/name: predictive-maintenance
+    app.kubernetes.io/managed-by: manual

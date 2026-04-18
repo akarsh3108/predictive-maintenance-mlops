@@ -1,0 +1,2 @@
+# Training data lives here but is not checked into git.
+# Generate it with: python -m src.data.generate_data --output data/sensors.csv

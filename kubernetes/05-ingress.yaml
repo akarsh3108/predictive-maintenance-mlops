@@ -1,0 +1,38 @@
+# Ingress — exposes the inference API to traffic outside the cluster.
+# Assumes nginx-ingress-controller is installed; adjust annotations for
+# ALB/GCE/Traefik as needed.
+#
+# For production TLS:
+#   - cert-manager handles the cert issuance (see cert-manager.io annotations)
+#   - Replace the host with your actual domain
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pdm-serving-ingress
+  namespace: pdm
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Protect against overly-large request bodies
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    # Reasonable timeouts for ML inference — 10s is generous for our model
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "10"
+    # cert-manager auto-provisions certs from Let's Encrypt
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - pdm.example.com
+      secretName: pdm-tls
+  rules:
+    - host: pdm.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pdm-serving
+                port:
+                  number: 80

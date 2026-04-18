@@ -1,0 +1,260 @@
+// Declarative Jenkins pipeline for the Predictive Maintenance MLOps workflow.
+//
+// Stages:
+//   1. Checkout & Setup   — get source, install deps
+//   2. Lint & Test        — static analysis + unit tests (fails fast)
+//   3. Train Model        — runs training, logs to MLflow, applies quality gate
+//   4. Validate Model     — additional offline checks beyond the in-training gate
+//   5. Build Image        — serving Docker image, tagged with git SHA
+//   6. Push Image         — to container registry
+//   7. Deploy to Staging  — K8s rolling update, smoke tests
+//   8. Deploy to Prod     — manual approval gate, then promote MLflow model + roll serving
+//
+// Triggers:
+//   - PR/main push: stages 1-5 (no deploy)
+//   - Merge to main: all stages through Staging
+//   - Manual: full pipeline including Production promotion
+
+pipeline {
+    agent {
+        kubernetes {
+            // Run Jenkins agent as a pod with Docker and kubectl available.
+            // Organizations typically have a shared agent template; this is
+            // a minimal inline version.
+            yaml '''
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                    - name: python
+                      image: python:3.11-slim
+                      command: [cat]
+                      tty: true
+                    - name: docker
+                      image: docker:24-dind
+                      securityContext:
+                        privileged: true
+                    - name: kubectl
+                      image: bitnami/kubectl:1.29
+                      command: [cat]
+                      tty: true
+            '''
+        }
+    }
+
+    environment {
+        REGISTRY        = 'ghcr.io/your-org'
+        IMAGE_NAME      = 'pdm-serving'
+        IMAGE_TAG       = "${env.GIT_COMMIT.take(8)}"
+        FULL_IMAGE      = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+        MLFLOW_TRACKING_URI = 'http://mlflow.pdm.svc.cluster.local:5000'
+        // Credentials stored in Jenkins: Manage Jenkins → Credentials
+        REGISTRY_CREDS  = credentials('registry-credentials')
+        KUBECONFIG_FILE = credentials('kubeconfig-staging')
+    }
+
+    options {
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        // Prevent concurrent builds on the same branch — avoids racing deploys
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Checkout & Setup') {
+            steps {
+                checkout scm
+                container('python') {
+                    sh '''
+                        python -m pip install --upgrade pip
+                        pip install -r requirements.txt
+                    '''
+                }
+            }
+        }
+
+        stage('Lint & Test') {
+            parallel {
+                stage('Lint') {
+                    steps {
+                        container('python') {
+                            sh '''
+                                ruff check src/ tests/
+                                black --check src/ tests/
+                            '''
+                        }
+                    }
+                }
+                stage('Unit Tests') {
+                    steps {
+                        container('python') {
+                            sh '''
+                                pytest tests/ \
+                                    --junitxml=test-results.xml \
+                                    --cov=src \
+                                    --cov-report=xml \
+                                    --cov-report=term
+                            '''
+                        }
+                    }
+                    post {
+                        always {
+                            junit 'test-results.xml'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Generate Data & Train') {
+            steps {
+                container('python') {
+                    sh '''
+                        # Generate fresh training data (in real life, pull from S3/feature store)
+                        python -m src.data.generate_data \
+                            --output data/sensors.csv \
+                            --samples 50000
+
+                        # Train — quality gate inside train.py raises if AUC < threshold
+                        export MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+                        python -m src.training.train --config configs/training.yaml
+
+                        # Capture the latest run id for downstream stages
+                        python -c "
+import mlflow
+mlflow.set_tracking_uri('${MLFLOW_TRACKING_URI}')
+client = mlflow.MlflowClient()
+runs = client.search_runs(
+    experiment_ids=[client.get_experiment_by_name('predictive_maintenance').experiment_id],
+    order_by=['start_time DESC'],
+    max_results=1,
+)
+with open('.mlflow_run_id', 'w') as f:
+    f.write(runs[0].info.run_id)
+print('Latest run:', runs[0].info.run_id)
+"
+                    '''
+                }
+                script {
+                    env.MLFLOW_RUN_ID = readFile('.mlflow_run_id').trim()
+                }
+            }
+        }
+
+        stage('Validate Model') {
+            steps {
+                container('python') {
+                    sh '''
+                        # Offline validation beyond the in-training gate:
+                        # - drift check between new run's data and previous run's data
+                        # - smoke predictions on canary inputs
+                        python scripts/validate_model.py --run-id ${MLFLOW_RUN_ID}
+                    '''
+                }
+            }
+        }
+
+        stage('Build & Push Image') {
+            when { branch 'main' }
+            steps {
+                container('docker') {
+                    sh '''
+                        echo "${REGISTRY_CREDS_PSW}" | docker login ${REGISTRY} \
+                            -u ${REGISTRY_CREDS_USR} --password-stdin
+
+                        docker build \
+                            -f docker/Dockerfile.serving \
+                            -t ${FULL_IMAGE} \
+                            -t ${REGISTRY}/${IMAGE_NAME}:latest \
+                            .
+
+                        docker push ${FULL_IMAGE}
+                        docker push ${REGISTRY}/${IMAGE_NAME}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Staging') {
+            when { branch 'main' }
+            steps {
+                container('kubectl') {
+                    sh '''
+                        export KUBECONFIG=${KUBECONFIG_FILE}
+
+                        # Rolling update: set image, K8s handles the rest
+                        kubectl set image deployment/pdm-serving \
+                            serving=${FULL_IMAGE} \
+                            -n pdm-staging
+
+                        # Wait up to 5 min for rollout to complete
+                        kubectl rollout status deployment/pdm-serving \
+                            -n pdm-staging --timeout=5m
+
+                        # Smoke test the new pods
+                        STAGING_URL=$(kubectl get svc pdm-serving -n pdm-staging \
+                            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                        curl -fsS http://${STAGING_URL}/health || exit 1
+                    '''
+                }
+            }
+        }
+
+        stage('Promote to Production') {
+            when { branch 'main' }
+            steps {
+                // Human gate — requires explicit approval in Jenkins UI
+                timeout(time: 24, unit: 'HOURS') {
+                    input message: 'Promote to Production?', ok: 'Promote'
+                }
+                container('python') {
+                    sh '''
+                        # Transition the MLflow model version from Staging → Production
+                        python scripts/promote_model.py \
+                            --run-id ${MLFLOW_RUN_ID} \
+                            --stage Production
+                    '''
+                }
+                container('kubectl') {
+                    sh '''
+                        export KUBECONFIG=${KUBECONFIG_FILE}
+
+                        # Deploy to prod cluster
+                        kubectl set image deployment/pdm-serving \
+                            serving=${FULL_IMAGE} \
+                            -n pdm
+
+                        kubectl rollout status deployment/pdm-serving \
+                            -n pdm --timeout=10m
+
+                        # Trigger /reload on each serving pod so they pick up
+                        # the newly-promoted Production model without waiting
+                        # for the next natural pod restart.
+                        for pod in $(kubectl get pod -n pdm -l app=pdm-serving -o name); do
+                            kubectl exec -n pdm $pod -- \
+                                curl -X POST -fsS \
+                                -H "X-Reload-Token: ${RELOAD_TOKEN}" \
+                                http://localhost:8000/reload
+                        done
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline succeeded — image: ${FULL_IMAGE}"
+        }
+        failure {
+            // Hook up Slack/email notifications here
+            echo "Pipeline FAILED — check Jenkins console for details"
+        }
+        always {
+            // Clean up the agent workspace
+            cleanWs()
+        }
+    }
+}

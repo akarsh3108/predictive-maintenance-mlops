@@ -1,0 +1,34 @@
+# Exclude everything that shouldn't be baked into the image
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+
+# Version control & CI
+.git
+.github
+.gitignore
+
+# Local data & model artifacts — these come from MLflow at runtime
+data/*.csv
+mlruns/
+mlflow.db
+*.pkl
+
+# IDE & OS junk
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Notebooks — not needed in production images
+notebooks/
+
+# Docs and tests — not needed at runtime
+README.md
+tests/

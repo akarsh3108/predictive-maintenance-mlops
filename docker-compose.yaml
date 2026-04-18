@@ -1,0 +1,67 @@
+# Local development stack.
+# Use this instead of Kubernetes when iterating — faster feedback loop.
+#
+# Usage:
+#   docker compose up -d mlflow              # start MLflow tracking server
+#   python -m src.training.train             # train a model (logs to localhost:5000)
+#   docker compose up -d serving             # start the inference API
+#   curl localhost:8000/health
+
+version: "3.9"
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.2
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  serving:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.serving
+    image: pdm-serving:latest
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: predictive_maintenance_model
+      MODEL_STAGE: Staging  # use Staging locally so you can test before promoting
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./kubernetes/prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - serving
+
+  grafana:
+    image: grafana/grafana:10.3.3
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    depends_on:
+      - prometheus
+
+volumes:
+  mlflow_data:

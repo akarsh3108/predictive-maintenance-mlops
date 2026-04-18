@@ -1,0 +1,54 @@
+# Multi-stage build for the FastAPI inference service.
+# Stage 1 compiles wheels; stage 2 copies only what's needed at runtime.
+# Result: slim production image (~1.2GB including PyTorch CPU).
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# System deps for building some wheels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+# Install to a target directory so we can copy it cleanly into the runtime image.
+# Using CPU-only torch keeps the image dramatically smaller than the default.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --target=/install \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
+
+# ---------- Runtime stage ----------
+FROM python:3.11-slim
+
+# Create non-root user — never run containers as root in production
+RUN groupadd -r pdm && useradd -r -g pdm -u 1000 pdm
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local/lib/python3.11/site-packages
+
+# Copy only the source code needed for serving
+COPY --chown=pdm:pdm src/ ./src/
+COPY --chown=pdm:pdm configs/ ./configs/
+
+USER pdm
+
+# Environment defaults — overridden by K8s ConfigMap/Secret
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PORT=8000 \
+    MODEL_NAME=predictive_maintenance_model \
+    MODEL_STAGE=Production
+
+EXPOSE 8000
+
+# Healthcheck — used by Docker and also as a secondary signal alongside K8s probes
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+
+CMD ["uvicorn", "src.serving.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,33 @@
+# Core ML
+torch==2.2.0
+numpy==1.26.4
+pandas==2.2.0
+scikit-learn==1.4.0
+
+# Experiment tracking & registry
+mlflow==2.10.2
+
+# Serving
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+
+# Monitoring & drift
+prometheus-client==0.19.0
+evidently==0.4.16
+
+# Config & utilities
+pyyaml==6.0.1
+python-dotenv==1.0.1
+click==8.1.7
+
+# Testing
+pytest==8.0.0
+pytest-cov==4.1.0
+pytest-asyncio==0.23.4
+httpx==0.26.0
+
+# Dev tools
+black==24.2.0
+ruff==0.2.1
+mypy==1.8.0

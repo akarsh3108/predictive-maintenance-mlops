@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Environments
+.env
+.venv
+venv/
+env/
+
+# ML artifacts — these live in MLflow, not git
+mlruns/
+mlflow.db
+mlartifacts/
+*.pkl
+*.pth
+*.pt
+*.ckpt
+
+# Data — generated or downloaded, not checked in
+data/*.csv
+data/*.parquet
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jenkins artifacts
+.mlflow_run_id
+test-results.xml

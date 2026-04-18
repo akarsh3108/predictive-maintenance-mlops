@@ -1,0 +1,133 @@
+# Predictive Maintenance inference service.
+#
+# Key production-readiness features:
+#   - Rolling update strategy: zero-downtime deploys
+#   - Startup/liveness/readiness probes: K8s only sends traffic when model is loaded
+#   - Resource requests AND limits: scheduler can bin-pack; runaway pods get killed
+#   - securityContext: non-root, read-only root filesystem, no privilege escalation
+#   - PodDisruptionBudget (separate file): protects availability during node drains
+#   - Prometheus annotations: auto-discovered by the Prometheus operator
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdm-serving
+  namespace: pdm
+  labels:
+    app: pdm-serving
+spec:
+  replicas: 3  # HPA will override this; starting point for initial rollout
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # add 1 new pod at a time
+      maxUnavailable: 0   # never drop below desired replica count
+  selector:
+    matchLabels:
+      app: pdm-serving
+  template:
+    metadata:
+      labels:
+        app: pdm-serving
+      annotations:
+        # Tell Prometheus to scrape /metrics on port 8000
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Distribute replicas across nodes for fault tolerance
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: pdm-serving
+      containers:
+        - name: serving
+          # Replace with your registry path; Jenkins updates this tag per build
+          image: ghcr.io/your-org/pdm-serving:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: pdm-serving-config
+            - secretRef:
+                name: pdm-serving-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          # Startup probe: gives the container up to 60s to load the model from MLflow
+          # before liveness starts counting failures against it.
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 2
+          # Liveness: is the process alive? If not, restart the pod.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness: should this pod receive traffic? Fails when model isn't loaded,
+          # which is exactly what we want during /reload or after startup.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # /tmp needed because readOnlyRootFilesystem is true and MLflow caches there
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdm-serving
+  namespace: pdm
+  labels:
+    app: pdm-serving
+spec:
+  selector:
+    app: pdm-serving
+  ports:
+    - port: 80
+      targetPort: 8000
+      name: http
+  type: ClusterIP
+---
+# Protects us during node drains — at least 2 pods must stay available
+# even when the cluster autoscaler or a node upgrade evicts pods.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdm-serving-pdb
+  namespace: pdm
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: pdm-serving

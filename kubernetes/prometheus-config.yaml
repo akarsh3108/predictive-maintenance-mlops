@@ -1,0 +1,25 @@
+# Prometheus scrape config.
+# In production, the Prometheus Operator picks up the
+# `prometheus.io/scrape: "true"` annotation on our pods automatically.
+# This config is for the docker-compose local dev setup.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: pdm-serving
+    static_configs:
+      - targets: ["serving:8000"]
+    metrics_path: /metrics
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# Alerting rules — fire if:
+#   - p99 latency breaches 500ms for 5 minutes
+#   - prediction score distribution shifts dramatically (possible model staleness)
+#   - error rate above 1% for 5 minutes
+rule_files:
+  - /etc/prometheus/alerts.yaml

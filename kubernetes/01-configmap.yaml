@@ -1,0 +1,27 @@
+# ConfigMap holds non-sensitive runtime settings.
+# Change these without rebuilding the image — pods will pick up new values
+# on next restart (or via rolling update).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdm-serving-config
+  namespace: pdm
+data:
+  MLFLOW_TRACKING_URI: "http://mlflow:5000"
+  MODEL_NAME: "predictive_maintenance_model"
+  MODEL_STAGE: "Production"
+  DECISION_THRESHOLD: "0.5"
+  LOG_LEVEL: "INFO"
+---
+# Secret holds the reload token used by the /reload endpoint.
+# In production, create this with: kubectl create secret generic pdm-serving-secrets \
+#   --from-literal=RELOAD_TOKEN=$(openssl rand -hex 32) -n pdm
+# The value below is a placeholder — DO NOT use in production.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pdm-serving-secrets
+  namespace: pdm
+type: Opaque
+stringData:
+  RELOAD_TOKEN: "replace-me-with-kubectl-create-secret"

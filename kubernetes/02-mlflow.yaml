@@ -1,0 +1,90 @@
+# MLflow tracking server — the source of truth for experiments and the model registry.
+#
+# In a real production setup, you'd back this with:
+#   - PostgreSQL for the metadata store (instead of SQLite)
+#   - S3 or GCS for the artifact store (instead of a local PVC)
+# Both are straightforward swaps via MLFLOW_BACKEND_STORE_URI and --default-artifact-root.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-data
+  namespace: pdm
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: pdm
+  labels:
+    app: mlflow
+spec:
+  replicas: 1  # single replica — MLflow SQLite backend doesn't support multi-writer
+  strategy:
+    type: Recreate  # avoid two pods writing to the same PVC during rollout
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v2.10.2
+          args:
+            - mlflow
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=sqlite:////mlflow/mlflow.db
+            - --default-artifact-root=/mlflow/artifacts
+          ports:
+            - containerPort: 5000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /mlflow
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mlflow-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: pdm
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: http
+  type: ClusterIP
